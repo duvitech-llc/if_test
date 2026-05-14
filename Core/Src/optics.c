@@ -193,7 +193,7 @@ static HAL_StatusTypeDef initialize_optic_device(int optic_index) {
 
     current_mux_idx[optic_index] = 0;
     st = MCP3462_ConfigScan(&dev->adc_handle,
-                            MCP3462_OSR_256,
+                            MCP3462_OSR_32,
                             MCP3462_GAIN_1,
                             MCP3462_CONV_1SHOT_STBY,
                             &scan_cfg);

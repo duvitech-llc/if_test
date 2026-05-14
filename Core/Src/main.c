@@ -1253,8 +1253,9 @@ void StartOpticsTask(void *argument)
       
       if (optics_getBuffer_byMask(0x01, &buf, &buf_len) == HAL_OK) {
         uint16_t sample_count = buf_len / 2;
+        uint16_t n = sample_count < 5u ? sample_count : 5u;
         printf("Optics[0] ch %d samples %u (laser=%u):\r\n", 0, sample_count, val1);
-        for (uint16_t i = 0; i < sample_count; i++) {
+        for (uint16_t i = 0; i < n; i++) {
           uint16_t sample = ((uint16_t)buf[i * 2] << 8) | buf[i * 2 + 1];
           printf(" (0x%04X) ", sample);
         }
@@ -1263,8 +1264,9 @@ void StartOpticsTask(void *argument)
 
       if (optics_getBuffer_byMask(0x04, &buf, &buf_len) == HAL_OK) {
         uint16_t sample_count = buf_len / 2;
+        uint16_t n = sample_count < 5u ? sample_count : 5u;
         printf("Optics[0] ch %d samples %u (laser=%u):\r\n", 2, sample_count, val2);
-        for (uint16_t i = 0; i < sample_count; i++) {
+        for (uint16_t i = 0; i < n; i++) {
           uint16_t sample = ((uint16_t)buf[i * 2] << 8) | buf[i * 2 + 1];
           printf(" (0x%04X) ", sample);
         }
