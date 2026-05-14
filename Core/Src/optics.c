@@ -179,28 +179,25 @@ static HAL_StatusTypeDef initialize_optic_device(int optic_index) {
         host_bit_for_idx[optic_index][i] = hb;
     }
 
-    /* Original-style configuration: no SCAN mode, manual MUX toggling between
-     * conversions. Matches the proven working setup from before the refactor. */
-    uint8_t cfg0 = 0x23;  /* internal clk, no current source, ADC in conversion */
-    st = MCP3462_WriteReg(&dev->adc_handle, MCP3462_REG_CONFIG0, &cfg0, 1);
-    if (st != HAL_OK) return st;
+    /* SCAN mode: let the chip cycle through the configured channels in
+     * dev->channels[]. TIM9 paces the read in optics_adcReadSamples(); the chip
+     * runs one full SCAN cycle per CONV_START in 1-shot/standby mode. */
+    MCP3462_ScanConfig scan_cfg = {
+        .scan_mask    = 0,
+        .dly_clocks   = 0,
+        .timer_clocks = 0,
+    };
+    for (uint8_t i = 0; i < dev->channel_count; ++i) {
+        scan_cfg.scan_mask |= (uint16_t)dev->channels[i];
+    }
 
-    uint8_t cfg1 = 0x00;
-    st = MCP3462_WriteReg(&dev->adc_handle, MCP3462_REG_CONFIG1, &cfg1, 1);
-    if (st != HAL_OK) return st;
-
-    uint8_t irq = 0x07;
-    st = MCP3462_WriteReg(&dev->adc_handle, MCP3462_REG_IRQ, &irq, 1);
-    if (st != HAL_OK) return st;
-
-    /* Start with the first channel selected */
     current_mux_idx[optic_index] = 0;
-    uint8_t mux = mux_bytes[optic_index][0];
-    st = MCP3462_WriteReg(&dev->adc_handle, MCP3462_REG_MUX, &mux, 1);
+    st = MCP3462_ConfigScan(&dev->adc_handle,
+                            MCP3462_OSR_256,
+                            MCP3462_GAIN_1,
+                            MCP3462_CONV_1SHOT_STBY,
+                            &scan_cfg);
     if (st != HAL_OK) return st;
-
-    /* Kick off first conversion */
-    MCP3462_FastCommand(&dev->adc_handle, MCP3462_FC_CONV_START);
 
     /* Clear capture buffer */
 	for(int i = 0; i <MAX_ADC_CHANNELS; i++){
@@ -281,60 +278,47 @@ HAL_StatusTypeDef optics_adcReadSamples(int optic_index) {
 		return HAL_ERROR;
 	}
 
-    OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
-    HAL_StatusTypeDef st = HAL_OK;
+	OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
+	HAL_StatusTypeDef st = HAL_OK;
 
-    uint8_t ch_id;
-    int32_t code32;
-    bool got_ch0 = false;
-    bool got_ch1 = false;
+	/* ISR-safe: no printf, no blocking delays. Drain one SCAN cycle worth of
+	 * samples (one per configured channel). The MCP3462 32_FULL format returns
+	 * CH_ID in bits [31:28]; for single-ended sources CH_ID equals the SCAN bit
+	 * position, so we use it directly as the per-channel buffer index. */
+	uint8_t want = dev->channel_count;
+	if (want == 0 || want > MAX_ADC_CHANNELS) return HAL_ERROR;
 
-	// In continuous mode, conversions happen automatically
-	// No need to trigger, just read the data
-
-	// In SCAN mode with 2 channels, we need to read exactly 2 samples per conversion cycle
-	// Try up to 8 times to get both channels (allows for retries if data not ready)
-	for(int i = 0; i < 8 && !(got_ch0 && got_ch1); i++){
+	uint8_t got = 0;
+	/* Allow a few extra read attempts in case nDR isn't asserted yet. Bounded
+	 * to keep ISR latency predictable; with OSR_256 a full cycle finishes in
+	 * well under 2 ms while TIM9 fires every 10 ms. */
+	for (uint8_t attempts = 0; attempts < (uint8_t)(want * 4u) && got < want; ++attempts) {
+		uint8_t  ch_id  = 0;
+		int32_t  code32 = 0;
 		st = MCP3462_ReadScanSample(&dev->adc_handle, &ch_id, &code32);
-		if (st == HAL_OK) {
-
-			printf("  ch: %d value: 0x%04X\r\n", ch_id, (uint16_t)code32);
-
-			// Reject CH_IDs that are out of the allocated sample array bounds.
-			// The MCP3462 32_FULL format encodes CH_ID in bits [31:28] (range 0-15);
-			// internal sources (temp, AVDD, VCM, offset) return IDs >= MAX_ADC_CHANNELS
-			// and must not be used as array indices.
-			if (ch_id >= MAX_ADC_CHANNELS) {
-				continue;
-			}
-
-			// code32 now holds a signed 16-bit ADC code in its low 16 bits
-			uint16_t code16 = (uint16_t)code32;
-
-			// Store the sample pair only if there is room for both bytes
-			if (dev->dataPtr[ch_id] + 2 <= ADC_UART_BUFFER_SIZE) {
-				dev->adcSamples[ch_id][dev->dataPtr[ch_id]++] = (uint8_t)(code16 >> 8);
-				dev->adcSamples[ch_id][dev->dataPtr[ch_id]++] = (uint8_t)(code16 & 0xFF);
-			}
-
-            if (ch_id == 0) {
-				got_ch0 = true;
-			} else if (ch_id == 1) {
-				got_ch1 = true;
-			} else {
-				// other channels / internal sources, ignore for now
-			}
-
-		} else if (st != HAL_BUSY) {
+		if (st == HAL_BUSY) {
+			continue;  /* nDR not asserted yet, retry */
+		}
+		if (st != HAL_OK) {
 			return st;
-		} else {
-			printf("  Read attempt %d: BUSY\r\n", i);
 		}
 
-		delay_us(1200);
+		++got;
 
+		/* Reject CH_IDs that fall outside the per-device buffer array */
+		if (ch_id >= MAX_ADC_CHANNELS) {
+			continue;
+		}
+
+		uint16_t code16 = (uint16_t)code32;
+		if (dev->dataPtr[ch_id] + 2u <= ADC_UART_BUFFER_SIZE) {
+			dev->adcSamples[ch_id][dev->dataPtr[ch_id]++] = (uint8_t)(code16 >> 8);
+			dev->adcSamples[ch_id][dev->dataPtr[ch_id]++] = (uint8_t)(code16 & 0xFF);
+		}
 	}
 
+	/* Re-arm: 1-shot SCAN mode requires a new CONV_START for the next cycle. */
+	(void)MCP3462_FastCommand(&dev->adc_handle, MCP3462_FC_CONV_START);
 	return HAL_OK;
 }
 
@@ -439,63 +423,20 @@ HAL_StatusTypeDef optics_adcRead()
 		return HAL_OK; /* nothing to read */
 	}
 
-	/* For each device: read the latest 16-bit ADCDATA, store under whichever logical
-	 * channel is currently selected, then advance MUX to the next requested channel
-	 * and start the next conversion. Mirrors the proven original optics_adcReadSamples. */
+	/* Drain one SCAN cycle for each active optic. The MCP3462 is configured in
+	 * 1-shot/standby SCAN mode by initialize_optic_device(); optics_adcReadSamples()
+	 * reads the samples and re-arms with CONV_START for the next TIM9 tick. */
 	uint32_t handled_devices = 0;
-
 	for (uint8_t bit = 0; bit < 32; ++bit) {
 		if ((active_optics_mask & (1u << bit)) == 0) continue;
 
 		uint8_t optic_index = (uint8_t)(bit >> 3);
-		if (optic_index >= OpticsCount) {
-			status = HAL_ERROR;
-			continue;
-		}
+		if (optic_index >= OpticsCount) { status = HAL_ERROR; continue; }
 		if (handled_devices & (1u << optic_index)) continue;
 		handled_devices |= (1u << optic_index);
 
-		OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
-		uint8_t enabled_ch_mask = (uint8_t)((active_optics_mask >> (optic_index * 8)) & 0xFF);
-
-		if (dev->channel_count == 0) continue;
-
-		/* Which channels[] entry was just converted */
-		uint8_t cur_idx = current_mux_idx[optic_index];
-		if (cur_idx >= dev->channel_count) cur_idx = 0;
-		uint8_t cur_host_bit = host_bit_for_idx[optic_index][cur_idx];
-
-		/* Read 16-bit ADCDATA */
-		uint8_t data[2] = {0};
-		HAL_StatusTypeDef st = MCP3462_ReadReg(&dev->adc_handle, MCP3462_REG_ADCDATA, data, 2);
-
-		if (st == HAL_OK && cur_host_bit < MAX_ADC_CHANNELS &&
-		    (enabled_ch_mask & (1u << cur_host_bit))) {
-			if (dev->dataPtr[cur_host_bit] + 2 <= ADC_UART_BUFFER_SIZE) {
-				dev->adcSamples[cur_host_bit][dev->dataPtr[cur_host_bit]++] = data[0];
-				dev->adcSamples[cur_host_bit][dev->dataPtr[cur_host_bit]++] = data[1];
-			}
-		} else if (st != HAL_OK) {
-			status = HAL_ERROR;
-		}
-
-		/* Advance round-robin to next channels[] entry whose host bit is enabled */
-		uint8_t next_idx = cur_idx;
-		for (uint8_t i = 1; i <= dev->channel_count; i++) {
-			uint8_t candidate = (uint8_t)((cur_idx + i) % dev->channel_count);
-			uint8_t cand_host_bit = host_bit_for_idx[optic_index][candidate];
-			if (cand_host_bit < MAX_ADC_CHANNELS &&
-			    (enabled_ch_mask & (1u << cand_host_bit))) {
-				next_idx = candidate;
-				break;
-			}
-		}
-		current_mux_idx[optic_index] = next_idx;
-
-		/* Set MUX for next conversion and kick it off */
-		uint8_t mux = mux_bytes[optic_index][next_idx];
-		MCP3462_WriteReg(&dev->adc_handle, MCP3462_REG_MUX, &mux, 1);
-		MCP3462_FastCommand(&dev->adc_handle, MCP3462_FC_CONV_START);
+		HAL_StatusTypeDef st = optics_adcReadSamples((int)optic_index);
+		if (st != HAL_OK) status = st;
 	}
 
 	return status;
