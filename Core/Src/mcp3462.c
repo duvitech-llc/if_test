@@ -285,12 +285,14 @@ HAL_StatusTypeDef MCP3462_ConfigScan(MCP3462_Handle *dev,
         MCP346X_CS_NONE,
         MCP346X_ADC_CONVERSION
     );
+    printf("Set CFG0: 0x%02X\r\n", cfg0);
     st = MCP3462_WriteReg(dev, MCP3462_REG_CONFIG0, &cfg0, 1);
     if (st != HAL_OK) return st;
 
     /* CONFIG1: PRE=0, OSR as requested */
     uint8_t cfg1 = (0u << MCP3462_CONFIG1_PRE_SHIFT)
                  | ((uint8_t)osr << MCP3462_CONFIG1_OSR_SHIFT);
+    printf("Set CFG1: 0x%02X\r\n", cfg1);
     st = MCP3462_WriteReg(dev, MCP3462_REG_CONFIG1, &cfg1, 1);
     if (st != HAL_OK) return st;
 
@@ -299,12 +301,14 @@ HAL_StatusTypeDef MCP3462_ConfigScan(MCP3462_Handle *dev,
                  | ((uint8_t)gain << MCP3462_CONFIG2_GAIN_SHIFT)
                  | (1u << MCP3462_CONFIG2_AZ_MUX_BIT)
                  | 0x03u;
+    printf("Set CFG2: 0x%02X\r\n", cfg2);
     st = MCP3462_WriteReg(dev, MCP3462_REG_CONFIG2, &cfg2, 1);
     if (st != HAL_OK) return st;
 
     /* CONFIG3: continuous SCAN + 32-bit FULL (CH_ID in MSbits) */
     uint8_t cfg3 = ((uint8_t)mode        << MCP3462_CONFIG3_CONVMODE_SHIFT) |
                    ((uint8_t)MCP3462_DATAFMT_32_FULL  << MCP3462_CONFIG3_DATAFMT_SHIFT);
+    printf("Set CFG3: 0x%02X\r\n", cfg3);
     st = MCP3462_WriteReg(dev, MCP3462_REG_CONFIG3, &cfg3, 1);
     if (st != HAL_OK) return st;
 

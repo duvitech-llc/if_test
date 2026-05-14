@@ -1215,6 +1215,7 @@ void StartOpticsTask(void *argument)
 {
   uint16_t val1 = 0;
   uint16_t val2 = 100;
+  uint16_t req_mask = 0x05; /* ADC channels to capture: CH0 and CH2. */
 
   if(optics_init() != HAL_OK) Error_Handler();
 
@@ -1224,10 +1225,13 @@ void StartOpticsTask(void *argument)
   if(optics_startLaser_byMask(0x01, val1) != HAL_OK) Error_Handler();
   if(optics_startLaser_byMask(0x02, val2) != HAL_OK) Error_Handler();
   /* ADC mask is per raw chip channel: CH0 = 0x01, CH2 = 0x04 -> 0x05 */
-  if(optics_adcStart(0x05) != HAL_OK) Error_Handler();
+  optics_clearBuffer_byMask(req_mask);
+  optics_adcStart(req_mask);
 
-  /* TIM9 paces the per-sample reads (period configured in MX_TIM9_Init). */
-  HAL_TIM_Base_Start_IT(&htim9);
+  if (optics_get_active_optics_mask() != 0 && (htim9.Instance->CR1 & TIM_CR1_CEN) == 0)
+  {
+    HAL_TIM_Base_Start_IT(&htim9);
+  }
 
   uint32_t last_dump_ms = HAL_GetTick();
 
@@ -1235,12 +1239,18 @@ void StartOpticsTask(void *argument)
   for(;;)
   {
     /* Every 500 ms: dump captured samples and roll the buffers. */
-    if ((HAL_GetTick() - last_dump_ms) >= 100u) {
+    if ((HAL_GetTick() - last_dump_ms) >= 1000u) {
       last_dump_ms = HAL_GetTick();
 
       uint8_t *buf = NULL;
       uint16_t buf_len = 0;
 
+      optics_adcStop(req_mask);
+      if (optics_get_active_optics_mask() == 0)
+      {
+        HAL_TIM_Base_Stop_IT(&htim9);
+      }
+      
       if (optics_getBuffer_byMask(0x01, &buf, &buf_len) == HAL_OK) {
         uint16_t sample_count = buf_len / 2;
         printf("Optics[0] ch %d samples %u (laser=%u):\r\n", 0, sample_count, val1);
@@ -1269,6 +1279,15 @@ void StartOpticsTask(void *argument)
       val2 -= 10; if (val2 < 1)   val2 = 100;
       (void)optics_startLaser_byMask(0x01, val1);
       (void)optics_startLaser_byMask(0x02, val2);
+      
+      optics_adcStart(req_mask);
+
+      if (optics_get_active_optics_mask() != 0 && (htim9.Instance->CR1 & TIM_CR1_CEN) == 0)
+      {
+        HAL_TIM_Base_Start_IT(&htim9);
+      }
+
+      
     }
 
   }
@@ -1316,7 +1335,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
   if (htim->Instance == TIM9) {
 	  /* Defer the SPI work to the main loop. */
-    (void)optics_adcReadSamples(0);
+    (void)optics_adcRead();
   }
   /* USER CODE END Callback 1 */
 }
