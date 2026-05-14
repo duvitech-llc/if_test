@@ -110,6 +110,7 @@ static void MX_TIM7_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
+void StartOpticsTask(void *argument);
 
 /* USER CODE END PFP */
 
