@@ -181,7 +181,7 @@ static HAL_StatusTypeDef initialize_optic_device(int optic_index) {
 
     /* Original-style configuration: no SCAN mode, manual MUX toggling between
      * conversions. Matches the proven working setup from before the refactor. */
-    uint8_t cfg0 = 0x63;  /* internal clk, no current source, ADC in conversion */
+    uint8_t cfg0 = 0x23;  /* internal clk, no current source, ADC in conversion */
     st = MCP3462_WriteReg(&dev->adc_handle, MCP3462_REG_CONFIG0, &cfg0, 1);
     if (st != HAL_OK) return st;
 
