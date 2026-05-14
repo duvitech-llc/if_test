@@ -205,6 +205,12 @@ static HAL_StatusTypeDef initialize_optic_device(int optic_index) {
 		dev->dataPtr[i] = 0;
 	}
 
+	/* Debug: dump registers after init */
+	char print_buffer[256];
+  	if (MCP3462_DumpRegs(&dev->adc_handle, print_buffer, sizeof(print_buffer)) == HAL_OK) {
+		printf("%s", print_buffer);
+	}
+
     return HAL_OK;
 }
 

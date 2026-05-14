@@ -4,6 +4,7 @@
 #include "stm32f4xx_hal.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -195,7 +196,7 @@ HAL_StatusTypeDef MCP3462_ReadData32_INC(MCP3462_Handle *dev, int32_t *out);
 bool MCP3462_DataReadyStatus(MCP3462_Handle *dev);
 
 /* Debug: dump a few key registers (CONFIGx, MUX, IRQ) into your buffer */
-HAL_StatusTypeDef MCP3462_DumpRegs(MCP3462_Handle *dev, uint8_t *buf, uint8_t buflen);
+HAL_StatusTypeDef MCP3462_DumpRegs(MCP3462_Handle *dev, char *buf, size_t buflen);
 
 /* SCAN mode configuration + read */
 HAL_StatusTypeDef MCP3462_ConfigScan(MCP3462_Handle *dev,

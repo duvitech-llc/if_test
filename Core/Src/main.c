@@ -1219,6 +1219,7 @@ void StartOpticsTask(void *argument)
 
   if(optics_init() != HAL_OK) Error_Handler();
 
+
   optics_clearBuffer_byMask(0x0f);
 
   /* Set initial laser powers and start the free-running SCAN. */

@@ -230,45 +230,50 @@ bool MCP3462_DataReadyStatus(MCP3462_Handle *dev) {
     return (status & 0x04u) == 0u;
 }
 
-/* Debug: dump registers */
-HAL_StatusTypeDef MCP3462_DumpRegs(MCP3462_Handle *dev, uint8_t *buf, uint8_t buflen) {
-    if (!buf || buflen < 8) return HAL_ERROR;
-    uint8_t off = 0; uint8_t v;
+/* Debug: dump registers as printable text into the caller's buffer.
+ * The buffer is filled with a NUL-terminated string the caller can pass
+ * to printf("%s", buf). No printf is performed inside this routine, so
+ * it is safe to call from contexts where stdio output is not desired. */
+HAL_StatusTypeDef MCP3462_DumpRegs(MCP3462_Handle *dev, char *buf, size_t buflen) {
+    if (!buf || buflen < 64u) return HAL_ERROR;
 
-    printf("MCP3462 Register Dump:\r\n");
-    printf("=====================\r\n");
+    size_t off = 0;
+    uint8_t v;
+    int n;
 
-    if (MCP3462_ReadReg(dev, MCP3462_REG_CONFIG0, &v, 1) == HAL_OK) {
-        buf[off++] = v;
-        printf("CONFIG0: 0x%02X\r\n", v);
-    } else printf("CONFIG0: READ FAILED\r\n");
+    #define DUMP_APPEND(...) do {                                       \
+        if (off < buflen) {                                             \
+            n = snprintf(buf + off, buflen - off, __VA_ARGS__);         \
+            if (n < 0) return HAL_ERROR;                                \
+            off += ((size_t)n < (buflen - off)) ? (size_t)n : (buflen - off - 1u); \
+        }                                                               \
+    } while (0)
 
-    if (MCP3462_ReadReg(dev, MCP3462_REG_CONFIG1, &v, 1) == HAL_OK) {
-        buf[off++] = v;
-        printf("CONFIG1: 0x%02X\r\n", v);
-    } else printf("CONFIG1: READ FAILED\r\n");
+    DUMP_APPEND("MCP3462 Register Dump:\r\n=====================\r\n");
 
-    if (MCP3462_ReadReg(dev, MCP3462_REG_CONFIG2, &v, 1) == HAL_OK) {
-        buf[off++] = v;
-        printf("CONFIG2: 0x%02X\r\n", v);
-    } else printf("CONFIG2: READ FAILED\r\n");
+    static const struct { uint8_t reg; const char *name; } regs[] = {
+        { MCP3462_REG_CONFIG0, "CONFIG0" },
+        { MCP3462_REG_CONFIG1, "CONFIG1" },
+        { MCP3462_REG_CONFIG2, "CONFIG2" },
+        { MCP3462_REG_CONFIG3, "CONFIG3" },
+        { MCP3462_REG_MUX,     "MUX    " },
+        { MCP3462_REG_IRQ,     "IRQ    " },
+    };
 
-    if (MCP3462_ReadReg(dev, MCP3462_REG_CONFIG3, &v, 1) == HAL_OK) {
-        buf[off++] = v;
-        printf("CONFIG3: 0x%02X\r\n", v);
-    } else printf("CONFIG3: READ FAILED\r\n");
+    for (size_t i = 0; i < sizeof(regs) / sizeof(regs[0]); ++i) {
+        if (MCP3462_ReadReg(dev, regs[i].reg, &v, 1) == HAL_OK) {
+            DUMP_APPEND("%s: 0x%02X\r\n", regs[i].name, v);
+        } else {
+            DUMP_APPEND("%s: READ FAILED\r\n", regs[i].name);
+        }
+    }
 
-    if (MCP3462_ReadReg(dev, MCP3462_REG_MUX, &v, 1) == HAL_OK) {
-        buf[off++] = v;
-        printf("MUX:     0x%02X\r\n", v);
-    } else printf("MUX:     READ FAILED\r\n");
+    DUMP_APPEND("=====================\r\n");
 
-    if (MCP3462_ReadReg(dev, MCP3462_REG_IRQ, &v, 1) == HAL_OK) {
-        buf[off++] = v;
-        printf("IRQ:     0x%02X\r\n", v);
-    } else printf("IRQ:     READ FAILED\r\n");
+    #undef DUMP_APPEND
 
-    printf("=====================\r\n");
+    /* Guarantee NUL termination even if we hit the buffer cap */
+    buf[(off < buflen) ? off : (buflen - 1u)] = '\0';
     return HAL_OK;
 }
 
@@ -350,8 +355,8 @@ HAL_StatusTypeDef MCP3462_ConfigScan(MCP3462_Handle *dev,
     if (st != HAL_OK) return st;
 
     /* Read back IRQ to clear any pending flags */
-    uint8_t irq_dummy;
-    (void)MCP3462_ReadReg(dev, MCP3462_REG_IRQ, &irq_dummy, 1);
+    uint8_t irq_dummy = 0x07;
+    (void)MCP3462_WriteReg(dev, MCP3462_REG_IRQ, &irq_dummy, 1);
 
     /* Start / restart conversions (SCAN mode is active because SCAN[15:0] != 0) */
     return MCP3462_FastCommand(dev, MCP3462_FC_CONV_START);
