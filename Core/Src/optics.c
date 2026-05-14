@@ -288,6 +288,16 @@ HAL_StatusTypeDef optics_adcReadSamples(int optic_index) {
 	uint8_t want = dev->channel_count;
 	if (want == 0 || want > MAX_ADC_CHANNELS) return HAL_ERROR;
 
+	/* Fire a fresh SCAN cycle and read its samples in order as the chip
+	 * produces them. We must read each channel before the next conversion
+	 * overwrites ADCDATA (the chip uses a single shared data register), so
+	 * the CONV_START goes here, not at the end. The previous design re-armed
+	 * after the read and then waited a full TIM9 tick (~10 ms) before reading;
+	 * by then a 2-channel scan at OSR_32 (~50 us total) had long completed and
+	 * ADCDATA only held the LAST converted channel, dropping the others. */
+	st = MCP3462_FastCommand(&dev->adc_handle, MCP3462_FC_CONV_START);
+	if (st != HAL_OK) return st;
+
 	uint8_t got = 0;
 	/* nDR-gated reads of the SCAN list. Each MCP3462_ReadScanSample is ~10 us
 	 * of SPI at 5 MHz; with OSR_256 a single channel conversion is ~750 us,
@@ -320,8 +330,6 @@ HAL_StatusTypeDef optics_adcReadSamples(int optic_index) {
 		}
 	}
 
-	/* Re-arm: 1-shot SCAN mode requires a new CONV_START for the next cycle. */
-	(void)MCP3462_FastCommand(&dev->adc_handle, MCP3462_FC_CONV_START);
 	return HAL_OK;
 }
 

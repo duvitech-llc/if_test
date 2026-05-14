@@ -1238,9 +1238,14 @@ void StartOpticsTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    /* Every 500 ms: dump captured samples and roll the buffers. */
-    if ((HAL_GetTick() - last_dump_ms) >= 1000u) {
-      last_dump_ms = HAL_GetTick();
+    /* Yield to the scheduler so logging/idle/lower-prio tasks can run.
+     * Without this the bare for(;;) busy-loops, starving the UART DMA
+     * pump and stretching the effective dump period well past 100 ms. */
+    osDelay(1);
+
+    /* Every 100 ms: dump captured samples and roll the buffers. */
+    if ((HAL_GetTick() - last_dump_ms) >= 100u) {
+      last_dump_ms += 100u;  /* fixed cadence; don't drift with work time */
 
       uint8_t *buf = NULL;
       uint16_t buf_len = 0;
