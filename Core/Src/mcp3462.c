@@ -160,9 +160,14 @@ HAL_StatusTypeDef MCP3462_ReadData16_INC(MCP3462_Handle *dev, int16_t *out)
     CS_HIGH(dev);
     if (st != HAL_OK) return st;
 
-    /* Status byte layout: [DEV_ADDR1][DEV_ADDR0][nDR][nCRCCFG][nPOR][0][0][0]
-     * nDR is bit 5 (mask 0x20), 0 = data ready. */
-    bool ready = ((rx[0] & 0x20u) == 0u);
+    /* Status byte layout (MCP3461/2/4 DS20006180 §6.1.1):
+     *   [7:4] = DEV_ADDR[1:0] || ~DEV_ADDR[1:0]
+     *   [3]   = 0
+     *   [2]   = nDR_STATUS   (0 = new ADCDATA ready)
+     *   [1]   = nCRCCFG_STATUS
+     *   [0]   = nPOR_STATUS
+     */
+    bool ready = ((rx[0] & 0x04u) == 0u);
     if (!ready) return HAL_BUSY;
 
     *out = (int16_t)((rx[1] << 8) | rx[2]);
@@ -194,8 +199,8 @@ HAL_StatusTypeDef MCP3462_ReadData32_INC(MCP3462_Handle *dev, int32_t *out)
     CS_HIGH(dev);
     if (st != HAL_OK) return st;
 
-    /* nDR is bit 5 of status (mask 0x20); 0 = data ready. */
-    if ((rx[0] & 0x20u) != 0u) return HAL_BUSY;
+    /* nDR is bit 2 of status (mask 0x04); 0 = data ready. */
+    if ((rx[0] & 0x04u) != 0u) return HAL_BUSY;
 
     *out = (int32_t)((uint32_t)rx[1]<<24 | (uint32_t)rx[2]<<16
                    | (uint32_t)rx[3]<<8  | (uint32_t)rx[4]);
@@ -221,8 +226,8 @@ bool MCP3462_DataReadyStatus(MCP3462_Handle *dev) {
     CS_LOW(dev);
     if (txrx(dev, &c, &status, 1) != HAL_OK) { CS_HIGH(dev); return false; }
     CS_HIGH(dev);
-    /* nDR bit (bit5) = 0 when data is ready */
-    return (status & 0x20u) == 0u;
+    /* nDR bit (bit 2, mask 0x04) = 0 when data is ready */
+    return (status & 0x04u) == 0u;
 }
 
 /* Debug: dump registers */
@@ -370,8 +375,8 @@ HAL_StatusTypeDef MCP3462_ReadScanSample(MCP3462_Handle *dev,
     CS_HIGH(dev);
     if (st != HAL_OK) return st;
 
-    /* Status byte: nDR is bit 5 (mask 0x20); 0 = data ready. */
-    if ((rx[0] & 0x20u) != 0u) return HAL_BUSY;
+    /* Status byte: nDR is bit 2 (mask 0x04); 0 = data ready. */
+    if ((rx[0] & 0x04u) != 0u) return HAL_BUSY;
 
     int32_t raw32 = (int32_t)((uint32_t)rx[1]<<24 | (uint32_t)rx[2]<<16
                              | (uint32_t)rx[3]<<8  | (uint32_t)rx[4]);

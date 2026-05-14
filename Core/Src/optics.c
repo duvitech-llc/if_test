@@ -289,10 +289,13 @@ HAL_StatusTypeDef optics_adcReadSamples(int optic_index) {
 	if (want == 0 || want > MAX_ADC_CHANNELS) return HAL_ERROR;
 
 	uint8_t got = 0;
-	/* Allow a few extra read attempts in case nDR isn't asserted yet. Bounded
-	 * to keep ISR latency predictable; with OSR_256 a full cycle finishes in
-	 * well under 2 ms while TIM9 fires every 10 ms. */
-	for (uint8_t attempts = 0; attempts < (uint8_t)(want * 4u) && got < want; ++attempts) {
+	/* nDR-gated reads of the SCAN list. Each MCP3462_ReadScanSample is ~10 us
+	 * of SPI at 5 MHz; with OSR_256 a single channel conversion is ~750 us,
+	 * so allow a generous busy-wait budget. Total ISR latency is bounded by
+	 * (channel_count * per-conversion time) which stays well under the 10 ms
+	 * TIM9 tick. */
+	const uint16_t max_attempts = (uint16_t)want * 256u;
+	for (uint16_t attempts = 0; attempts < max_attempts && got < want; ++attempts) {
 		uint8_t  ch_id  = 0;
 		int32_t  code32 = 0;
 		st = MCP3462_ReadScanSample(&dev->adc_handle, &ch_id, &code32);
