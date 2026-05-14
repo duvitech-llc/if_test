@@ -185,7 +185,7 @@ static HAL_StatusTypeDef initialize_optic_device(int optic_index) {
     st = MCP3462_WriteReg(&dev->adc_handle, MCP3462_REG_CONFIG0, &cfg0, 1);
     if (st != HAL_OK) return st;
 
-    uint8_t cfg1 = 0x08;
+    uint8_t cfg1 = 0x00;
     st = MCP3462_WriteReg(&dev->adc_handle, MCP3462_REG_CONFIG1, &cfg1, 1);
     if (st != HAL_OK) return st;
 
