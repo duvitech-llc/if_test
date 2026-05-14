@@ -108,7 +108,6 @@ static void MX_TIM9_Init(void);
 static void MX_CRC_Init(void);
 static void MX_TIM7_Init(void);
 void StartDefaultTask(void *argument);
-void StartOpticsTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -399,10 +398,10 @@ static void MX_SPI4_Init(void)
   hspi4.Init.Mode = SPI_MODE_MASTER;
   hspi4.Init.Direction = SPI_DIRECTION_2LINES;
   hspi4.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi4.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi4.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi4.Init.CLKPolarity = SPI_POLARITY_HIGH;
+  hspi4.Init.CLKPhase = SPI_PHASE_2EDGE;
   hspi4.Init.NSS = SPI_NSS_SOFT;
-  hspi4.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi4.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
   hspi4.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi4.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi4.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -1228,78 +1227,6 @@ void StartDefaultTask(void *argument)
     osDelay(1);
   }
   /* USER CODE END 5 */
-}
-
-/* USER CODE BEGIN Header_StartOpticsTask */
-/**
-  * @brief  Function implementing the opticsTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartOpticsTask */
-void StartOpticsTask(void *argument)
-{
-  uint16_t val1 = 0;
-  uint16_t val2 = 100;
-
-  /* USER CODE BEGIN StartOpticsTask */
-  if(optics_init() != HAL_OK) Error_Handler();
-
-  optics_clearBuffer_byMask(0x0f);
-
-  /* Set initial laser powers and start the free-running SCAN. */
-  if(optics_startLaser_byMask(0x01, val1) != HAL_OK) Error_Handler();
-  if(optics_startLaser_byMask(0x02, val2) != HAL_OK) Error_Handler();
-  /* ADC mask is per raw chip channel: CH0 = 0x01, CH2 = 0x04 -> 0x05 */
-  if(optics_adcStart(0x05) != HAL_OK) Error_Handler();
-
-  /* TIM9 paces the per-sample reads (period configured in MX_TIM9_Init). */
-  HAL_TIM_Base_Start_IT(&htim9);
-
-  uint32_t last_dump_ms = HAL_GetTick();
-
-  /* Infinite loop */
-  for(;;)
-  {
-    /* Every 500 ms: dump captured samples and roll the buffers. */
-    if ((HAL_GetTick() - last_dump_ms) >= 100u) {
-      last_dump_ms = HAL_GetTick();
-
-      uint8_t *buf = NULL;
-      uint16_t buf_len = 0;
-
-      if (optics_getBuffer_byMask(0x01, &buf, &buf_len) == HAL_OK) {
-        uint16_t sample_count = buf_len / 2;
-        printf("Optics[0] ch %d samples %u (laser=%u):\r\n", 0, sample_count, val1);
-        for (uint16_t i = 0; i < sample_count; i++) {
-          uint16_t sample = ((uint16_t)buf[i * 2] << 8) | buf[i * 2 + 1];
-          printf(" (0x%04X) ", sample);
-        }
-      }
-      printf("\r\n");
-
-      if (optics_getBuffer_byMask(0x04, &buf, &buf_len) == HAL_OK) {
-        uint16_t sample_count = buf_len / 2;
-        printf("Optics[0] ch %d samples %u (laser=%u):\r\n", 2, sample_count, val2);
-        for (uint16_t i = 0; i < sample_count; i++) {
-          uint16_t sample = ((uint16_t)buf[i * 2] << 8) | buf[i * 2 + 1];
-          printf(" (0x%04X) ", sample);
-        }
-      }
-      printf("\r\n\r\n");
-
-      /* Reset buffers for the next window: clear chip channels 0 and 2. */
-      optics_clearBuffer_byMask(0x05);
-
-      /* Step the laser powers. */
-      val1 += 10; if (val1 > 100) val1 = 0;
-      val2 -= 10; if (val2 < 1)   val2 = 100;
-      (void)optics_startLaser_byMask(0x01, val1);
-      (void)optics_startLaser_byMask(0x02, val2);
-    }
-
-  }
-  /* USER CODE END StartOpticsTask */
 }
 
 /**
